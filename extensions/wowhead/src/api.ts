@@ -374,21 +374,24 @@ function decodeHtmlEntities(input: string): string {
 }
 
 const TOOLTIP_CLASS_COLORS: Record<string, string> = {
-  q0: "#9d9d9d",
-  q1: "#ffffff",
   q2: "#1eff00",
   q3: "#0070dd",
   q4: "#a335ee",
   q5: "#ff8000",
-  q6: "#e6cc80",
+  q6: "#b08a43",
   q7: "#00ccff",
-  q: "#ffd100",
+  q: "#a06f00",
   "whtt-name": "#ff8000",
-  "wowhead-tooltip-requirements": "#9d9d9d",
-  moneygold: "#ffd100",
-  moneysilver: "#c7c7cf",
+  moneygold: "#a06f00",
+  moneysilver: "#7a7a82",
   moneycopper: "#c8602c",
 };
+
+const THEME_INHERITED_TOOLTIP_CLASSES = new Set([
+  "q0",
+  "q1",
+  "wowhead-tooltip-requirements",
+]);
 
 function colorFromTooltipLine(rawLine: string): string | undefined {
   const classValue = rawLine.match(/class\s*=\s*"([^"]+)"/i)?.[1];
@@ -402,6 +405,10 @@ function colorFromTooltipLine(rawLine: string): string | undefined {
     .filter((token) => token.length > 0);
 
   for (const token of tokens) {
+    if (THEME_INHERITED_TOOLTIP_CLASSES.has(token)) {
+      return undefined;
+    }
+
     const color = TOOLTIP_CLASS_COLORS[token];
     if (color) {
       return color;
