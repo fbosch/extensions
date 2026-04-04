@@ -26,6 +26,10 @@ export type WowheadEntityDetail = {
   bind?: string;
   itemType?: string;
   sellPrice?: string;
+  castTime?: string;
+  range?: string;
+  cost?: string;
+  cooldown?: string;
   tooltipHtml?: string;
   secondaryTooltipHtml?: string;
   tooltipSvgDataUrl?: string;

@@ -30,7 +30,7 @@ function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): str
   const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
   const primaryTooltipWithIcon =
     detail?.iconUrl && primaryTooltip
-      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:8px;" />${primaryTooltip}</span>`
+      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:0;" />&nbsp;&nbsp;${primaryTooltip}</span>`
       : primaryTooltip;
   const hasTooltip =
     (primaryTooltipWithIcon?.length ?? 0) > 0 ||
@@ -169,6 +169,10 @@ export function ResultPage({ result }: { result: WowheadResult }) {
           {detail?.bind && <Detail.Metadata.Label title="Bind" text={detail.bind} />}
           {detail?.itemType && <Detail.Metadata.Label title="Item Type" text={detail.itemType} />}
           {detail?.sellPrice && <Detail.Metadata.Label title="Sell Price" text={detail.sellPrice} />}
+          {detail?.cost && <Detail.Metadata.Label title="Cost" text={detail.cost} />}
+          {detail?.range && <Detail.Metadata.Label title="Range" text={detail.range} />}
+          {detail?.castTime && <Detail.Metadata.Label title="Cast Time" text={detail.castTime} />}
+          {detail?.cooldown && <Detail.Metadata.Label title="Cooldown" text={detail.cooldown} />}
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Path" text={result.path} />
           <Detail.Metadata.Separator />

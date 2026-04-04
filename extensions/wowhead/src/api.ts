@@ -297,6 +297,8 @@ const TOOLTIP_CLASS_COLORS: Record<string, string> = {
   q6: "#e6cc80",
   q7: "#00ccff",
   q: "#ffd100",
+  "whtt-name": "#ff8000",
+  "wowhead-tooltip-requirements": "#9d9d9d",
   moneygold: "#ffd100",
   moneysilver: "#c7c7cf",
   moneycopper: "#c8602c",
@@ -332,7 +334,77 @@ function escapeHtml(input: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeTooltipHtml(html: string): string {
+type EntityKind = Exclude<WowheadEntityType, "all">;
+
+type RenderPlanEntry = {
+  status: "implemented" | "planned";
+  relevantFacts: string[];
+  notes: string;
+};
+
+const TOOLTIP_RENDER_PLAN: Record<EntityKind, RenderPlanEntry> = {
+  item: {
+    status: "implemented",
+    relevantFacts: ["source", "bind", "level", "itemType", "sellPrice"],
+    notes: "Handles item table rows and money formatting.",
+  },
+  spell: {
+    status: "implemented",
+    relevantFacts: ["requires", "level", "cost", "range", "castTime", "cooldown"],
+    notes: "Keeps cast/cost/range/cooldown rows separated.",
+  },
+  quest: {
+    status: "implemented",
+    relevantFacts: ["source", "requires", "level"],
+    notes: "Keeps objective and requirement lines readable.",
+  },
+  npc: {
+    status: "planned",
+    relevantFacts: ["location", "level", "faction"],
+    notes: "Add map/location extraction from tooltip payload.",
+  },
+  achievement: {
+    status: "planned",
+    relevantFacts: ["points", "criteriaCount", "category"],
+    notes: "Parse criteria rows and point values.",
+  },
+  object: {
+    status: "planned",
+    relevantFacts: ["location", "contains", "requiredSkill"],
+    notes: "Prioritize map and interaction details.",
+  },
+  zone: {
+    status: "planned",
+    relevantFacts: ["expansion", "levelRange", "type"],
+    notes: "Add zone-level and category extraction.",
+  },
+  faction: {
+    status: "planned",
+    relevantFacts: ["side", "standing", "rewards"],
+    notes: "Add reputation-specific fact extraction.",
+  },
+  currency: {
+    status: "planned",
+    relevantFacts: ["cap", "source", "spendAt"],
+    notes: "Prioritize acquisition and spend locations.",
+  },
+  recipe: {
+    status: "planned",
+    relevantFacts: ["requires", "profession", "source"],
+    notes: "Split profession requirements from source.",
+  },
+  guide: {
+    status: "planned",
+    relevantFacts: ["author", "updated", "category"],
+    notes: "Guide cards need dedicated summary layout.",
+  },
+};
+
+export function getTooltipRenderPlan(): Record<EntityKind, RenderPlanEntry> {
+  return TOOLTIP_RENDER_PLAN;
+}
+
+function normalizeCommonTooltipHtml(html: string): string {
   return html
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<\s*\/\s*table\s*>/gi, "\n")
@@ -347,14 +419,53 @@ function normalizeTooltipHtml(html: string): string {
     .replace(/<\s*\/\s*p\s*>/gi, "\n")
     .replace(/<\s*p[^>]*>/gi, "")
     .replace(/<\s*\/\s*div\s*>/gi, "\n")
-    .replace(/<\s*div[^>]*>/gi, "")
+    .replace(/<\s*div[^>]*>/gi, "\n$&")
     .replace(/<\s*li[^>]*>/gi, "- ")
     .replace(/<\s*\/\s*li\s*>/gi, "\n")
     .replace(/\r/g, "");
 }
 
-function tooltipLines(html: string): Array<{ raw: string; text: string }> {
-  return normalizeTooltipHtml(html)
+function normalizeItemTooltipHtml(html: string): string {
+  return normalizeCommonTooltipHtml(html)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeSpellTooltipHtml(html: string): string {
+  return normalizeCommonTooltipHtml(html)
+    .replace(/<\s*\/\s*td\s*>\s*<\s*th[^>]*>/gi, " | ")
+    .replace(/<\s*\/\s*th\s*>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeQuestTooltipHtml(html: string): string {
+  return normalizeCommonTooltipHtml(html)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeTooltipForType(type: EntityKind, html: string): string {
+  if (type === "item") {
+    return normalizeItemTooltipHtml(html);
+  }
+
+  if (type === "spell") {
+    return normalizeSpellTooltipHtml(html);
+  }
+
+  if (type === "quest") {
+    return normalizeQuestTooltipHtml(html);
+  }
+
+  return normalizeCommonTooltipHtml(html).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function tooltipLines(
+  html: string,
+  entityType: EntityKind,
+): Array<{ raw: string; text: string }> {
+  return normalizeTooltipForType(entityType, html)
     .split("\n")
     .map((rawLine) => {
       const text = decodeHtmlEntities(rawLine)
@@ -398,7 +509,10 @@ function extractSellPrice(tooltipHtml: string | undefined): string | undefined {
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-function extractSourceInfo(tooltipHtml: string | undefined): {
+function extractSourceInfo(
+  entityType: EntityKind,
+  tooltipHtml: string | undefined,
+): {
   source?: string;
   sourceUrl?: string;
 } {
@@ -406,7 +520,7 @@ function extractSourceInfo(tooltipHtml: string | undefined): {
     return {};
   }
 
-  const lines = tooltipLines(tooltipHtml);
+  const lines = tooltipLines(tooltipHtml, entityType);
   const sourceLine = lines.find((line) =>
     /^(Dropped by|Reward from|Sold by|Created by|Starts|Provided by|Contains|Found in|Teaches)/i.test(
       line.text,
@@ -424,7 +538,7 @@ function extractSourceInfo(tooltipHtml: string | undefined): {
   };
 }
 
-function extractTooltipFacts(tooltipHtml: string | undefined): {
+function extractItemTooltipFacts(tooltipHtml: string | undefined): {
   requires?: string;
   level?: string;
   bind?: string;
@@ -435,7 +549,7 @@ function extractTooltipFacts(tooltipHtml: string | undefined): {
     return {};
   }
 
-  const lines = tooltipLines(tooltipHtml).map((line) => line.text);
+  const lines = tooltipLines(tooltipHtml, "item").map((line) => line.text);
   const requires = firstLineMatching(lines, /^Requires\b/i);
   const level =
     firstLineMatching(lines, /^Item Level\s+\d+/i) ??
@@ -458,6 +572,110 @@ function extractTooltipFacts(tooltipHtml: string | undefined): {
   };
 }
 
+function extractSpellTooltipFacts(tooltipHtml: string | undefined): {
+  requires?: string;
+  level?: string;
+  castTime?: string;
+  range?: string;
+  cost?: string;
+  cooldown?: string;
+} {
+  if (!tooltipHtml) {
+    return {};
+  }
+
+  const lines = tooltipLines(tooltipHtml, "spell").map((line) => line.text);
+  const requires = firstLineMatching(lines, /^Requires\b/i);
+  const level =
+    firstLineMatching(lines, /^Level\s+\d+/i) ??
+    firstLineMatching(lines, /^Requires Level\s+\d+/i);
+
+  const castLine = firstLineMatching(
+    lines,
+    /\b(Instant|Channeled|\d+(?:\.\d+)?\s*(?:sec|min)\s+cast)\b/i,
+  );
+  const rangeLine = firstLineMatching(lines, /\b(Melee Range|\d+\s*yd range|Unlimited Range)\b/i);
+  const costLine = firstLineMatching(
+    lines,
+    /\b(mana|energy|rage|focus|runic power|health|soul shard|essence)\b/i,
+  );
+  const cooldownLine = firstLineMatching(lines, /\bcooldown\b/i);
+
+  const castTime = castLine?.match(
+    /(Instant|Channeled|\d+(?:\.\d+)?\s*(?:sec|min)\s+cast)/i,
+  )?.[1];
+  const range = rangeLine?.match(/(Melee Range|\d+\s*yd range|Unlimited Range)/i)?.[1];
+  const cost = costLine?.match(
+    /(\d+(?:\.\d+)?%?\s+of\s+base\s+mana|\d+(?:\.\d+)?\s*(?:mana|energy|rage|focus|runic power|health|soul shards?|essence))/i,
+  )?.[1];
+  const cooldown = cooldownLine?.match(/(\d+(?:\.\d+)?\s*(?:sec|min|hr)\s+cooldown|cooldown)/i)?.[1];
+
+  return {
+    requires,
+    level,
+    castTime,
+    range,
+    cost,
+    cooldown,
+  };
+}
+
+function extractQuestTooltipFacts(tooltipHtml: string | undefined): {
+  requires?: string;
+  level?: string;
+} {
+  if (!tooltipHtml) {
+    return {};
+  }
+
+  const lines = tooltipLines(tooltipHtml, "quest").map((line) => line.text);
+  const requires = firstLineMatching(lines, /^Requires\b/i);
+  const level =
+    firstLineMatching(lines, /^Level\s+\d+/i) ??
+    firstLineMatching(lines, /^Requires Level\s+\d+/i);
+
+  return {
+    requires,
+    level,
+  };
+}
+
+function extractTooltipFacts(
+  entityType: EntityKind,
+  tooltipHtml: string | undefined,
+): {
+  requires?: string;
+  level?: string;
+  bind?: string;
+  itemType?: string;
+  sellPrice?: string;
+  castTime?: string;
+  range?: string;
+  cost?: string;
+  cooldown?: string;
+} {
+  if (entityType === "item") {
+    return extractItemTooltipFacts(tooltipHtml);
+  }
+
+  if (entityType === "spell") {
+    return extractSpellTooltipFacts(tooltipHtml);
+  }
+
+  if (entityType === "quest") {
+    return extractQuestTooltipFacts(tooltipHtml);
+  }
+
+  return {
+    requires:
+      tooltipHtml ? firstLineMatching(tooltipLines(tooltipHtml, entityType).map((line) => line.text), /^Requires\b/i) : undefined,
+    level:
+      tooltipHtml
+        ? firstLineMatching(tooltipLines(tooltipHtml, entityType).map((line) => line.text), /^(Item Level\s+\d+|Level\s+\d+|Requires Level\s+\d+)/i)
+        : undefined,
+  };
+}
+
 function renderTooltipLine(text: string, color?: string): string {
   if (!color) {
     return text;
@@ -466,12 +684,15 @@ function renderTooltipLine(text: string, color?: string): string {
   return `<span style="color: ${color}">${text}</span>`;
 }
 
-function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
+function tooltipHtmlToMarkdown(
+  html: string | undefined,
+  entityType: EntityKind,
+): string | undefined {
   if (!html) {
     return undefined;
   }
 
-  const normalized = normalizeTooltipHtml(html);
+  const normalized = normalizeTooltipForType(entityType, html);
 
   const renderedLines = normalized
     .split("\n")
@@ -490,6 +711,8 @@ function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
     })
     .join("<br/>")
     .replace(/(<br\/>){3,}/g, "<br/><br/>")
+    .replace(/^(<br\/>)+/g, "")
+    .replace(/(<br\/>)+$/g, "")
     .trim();
 
   return renderedLines.length > 0 ? renderedLines : undefined;
@@ -714,8 +937,8 @@ export async function fetchWowheadEntityDetail(
     quality: typeof payload.quality === "number" ? payload.quality : undefined,
     commentCount: cachedEngagement?.commentCount,
     screenshotCount: cachedEngagement?.screenshotCount,
-    ...extractSourceInfo(payload.tooltip),
-    ...extractTooltipFacts(payload.tooltip),
+    ...extractSourceInfo(result.type, payload.tooltip),
+    ...extractTooltipFacts(result.type, payload.tooltip),
     tooltipHtml:
       typeof payload.tooltip === "string" && payload.tooltip.trim().length > 0
         ? payload.tooltip
@@ -724,8 +947,8 @@ export async function fetchWowheadEntityDetail(
       typeof payload.tooltip2 === "string" && payload.tooltip2.trim().length > 0
         ? payload.tooltip2
         : undefined,
-    tooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip),
-    secondaryTooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip2),
+    tooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip, result.type),
+    secondaryTooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip2, result.type),
     tooltipSvgDataUrl: buildTooltipSvgDataUrl({
       title:
         typeof payload.name === "string" && payload.name.trim().length > 0
