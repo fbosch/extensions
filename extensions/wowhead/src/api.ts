@@ -341,6 +341,15 @@ function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
   }
 
   const normalized = html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<\s*\/\s*table\s*>/gi, "\n")
+    .replace(/<\s*table[^>]*>/gi, "\n")
+    .replace(/<\s*\/\s*tr\s*>/gi, "\n")
+    .replace(/<\s*tr[^>]*>/gi, "")
+    .replace(/<\s*\/\s*th\s*>/gi, "")
+    .replace(/<\s*th[^>]*>/gi, " ")
+    .replace(/<\s*\/\s*td\s*>/gi, " ")
+    .replace(/<\s*td[^>]*>/gi, "")
     .replace(/<\s*br\s*\/?>/gi, "\n")
     .replace(/<\s*\/\s*p\s*>/gi, "\n")
     .replace(/<\s*p[^>]*>/gi, "")
@@ -354,7 +363,10 @@ function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
     .split("\n")
     .map((rawLine) => {
       const color = colorFromTooltipLine(rawLine);
-      const plainText = decodeHtmlEntities(rawLine).replace(/<[^>]+>/g, "").trim();
+      const plainText = decodeHtmlEntities(rawLine)
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
       if (plainText.length === 0) {
         return "<br/>";
       }

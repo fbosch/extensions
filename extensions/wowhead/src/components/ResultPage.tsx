@@ -1,4 +1,14 @@
-import { Detail, Icon } from "@vicinae/api";
+import {
+  Action,
+  ActionPanel,
+  closeMainWindow,
+  Detail,
+  Icon,
+  Keyboard,
+  open,
+  showToast,
+  Toast,
+} from "@vicinae/api";
 import { useEffect, useState } from "react";
 import { fetchWowheadEntityDetail } from "../api";
 import type { WowheadEntityDetail, WowheadResult } from "../types";
@@ -73,6 +83,29 @@ export function ResultPage({ result }: { result: WowheadResult }) {
     <Detail
       navigationTitle={result.title}
       markdown={isLoading ? "Loading details..." : buildMarkdown(result, detail)}
+      actions={
+        <ActionPanel>
+          <Action
+            title="Open on Wowhead"
+            icon={Icon.Globe01}
+            shortcut={Keyboard.Shortcut.Common.Open}
+            onAction={async () => {
+              await open(result.url);
+              await showToast({
+                style: Toast.Style.Success,
+                title: "Opened in browser",
+                message: result.title,
+              });
+              await closeMainWindow();
+            }}
+          />
+          <Action.CopyToClipboard
+            title="Copy URL"
+            content={result.url}
+            shortcut={Keyboard.Shortcut.Common.Copy}
+          />
+        </ActionPanel>
+      }
       metadata={
         <Detail.Metadata>
           <Detail.Metadata.Label title="Type" text={result.typeLabel} />
