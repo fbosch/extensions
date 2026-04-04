@@ -5,19 +5,20 @@ import type { WowheadEntityDetail, WowheadResult } from "../types";
 
 function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
   const heading = detail?.name ?? result.title;
+  const primaryTooltip = detail?.tooltipMarkdown?.trim();
+  const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
+  const primaryTooltipWithIcon =
+    detail?.iconUrl && primaryTooltip
+      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="32" height="32" style="display:inline-block;vertical-align:middle;margin-right:8px;" />${primaryTooltip}</span>`
+      : primaryTooltip;
   const hasTooltip =
-    (detail?.tooltipMarkdown?.trim().length ?? 0) > 0 ||
-    (detail?.secondaryTooltipMarkdown?.trim().length ?? 0) > 0;
+    (primaryTooltipWithIcon?.length ?? 0) > 0 ||
+    (secondaryTooltip?.length ?? 0) > 0;
 
   const sections = [
-    detail?.iconUrl
-      ? `<img src="${detail.iconUrl}" alt="${heading}" width="32" height="32" />`
-      : undefined,
     hasTooltip === false ? `# ${heading}` : undefined,
-    detail?.tooltipMarkdown,
-    detail?.secondaryTooltipMarkdown
-      ? `\n\n${detail.secondaryTooltipMarkdown}`
-      : undefined,
+    primaryTooltipWithIcon,
+    secondaryTooltip,
   ].filter((section): section is string => section !== undefined);
 
   return sections.join("\n\n");
