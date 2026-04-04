@@ -10,7 +10,7 @@ import {
   Toast,
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
-import { fetchWowheadEntityDetail } from "../api";
+import { fetchWowheadEngagementCounts, fetchWowheadEntityDetail } from "../api";
 import type { WowheadEntityDetail, WowheadResult } from "../types";
 
 const QUALITY_LABELS: Record<number, string> = {
@@ -30,7 +30,7 @@ function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): str
   const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
   const primaryTooltipWithIcon =
     detail?.iconUrl && primaryTooltip
-      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="32" height="32" style="display:inline-block;vertical-align:middle;margin-right:8px;" />${primaryTooltip}</span>`
+      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:8px;" />${primaryTooltip}</span>`
       : primaryTooltip;
   const hasTooltip =
     (primaryTooltipWithIcon?.length ?? 0) > 0 ||
@@ -48,6 +48,10 @@ function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): str
 export function ResultPage({ result }: { result: WowheadResult }) {
   const [detail, setDetail] = useState<WowheadEntityDetail | undefined>();
   const [isLoading, setIsLoading] = useState(result.entityId !== undefined);
+  const [engagement, setEngagement] = useState<{
+    commentCount?: number;
+    screenshotCount?: number;
+  }>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -80,6 +84,38 @@ export function ResultPage({ result }: { result: WowheadResult }) {
     };
   }, [result]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    setEngagement({});
+    if (result.entityId === undefined) {
+      return;
+    }
+
+    fetchWowheadEngagementCounts(result).then((next) => {
+      if (isMounted === false) {
+        return;
+      }
+
+      setEngagement(next);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [result]);
+
+  const displayTitle = detail?.name ?? result.title;
+  const commentsUrl = `${result.url}#comments`;
+  const screenshotsUrl = `${result.url}#screenshots`;
+  const relatedUrl = `${result.url}#related`;
+  const markdownLink = `[${displayTitle}](${result.url})`;
+  const screenshotCount = detail?.screenshotCount ?? engagement.screenshotCount;
+  const screenshotsLinkText =
+    screenshotCount !== undefined
+      ? `#screenshots (${screenshotCount})`
+      : "#screenshots";
+
   return (
     <Detail
       navigationTitle={result.title}
@@ -105,6 +141,11 @@ export function ResultPage({ result }: { result: WowheadResult }) {
             content={result.url}
             shortcut={Keyboard.Shortcut.Common.Copy}
           />
+          {result.entityId && (
+            <Action.CopyToClipboard title="Copy ID" content={result.entityId} />
+          )}
+          <Action.CopyToClipboard title="Copy Path" content={result.path} />
+          <Action.CopyToClipboard title="Copy Markdown Link" content={markdownLink} />
         </ActionPanel>
       }
       metadata={
@@ -118,9 +159,27 @@ export function ResultPage({ result }: { result: WowheadResult }) {
               icon={{ source: Icon.Star }}
             />
           )}
+          {detail?.sourceUrl ? (
+            <Detail.Metadata.Link title="Source" text={detail.source ?? "Open Source"} target={detail.sourceUrl} />
+          ) : (
+            detail?.source && <Detail.Metadata.Label title="Source" text={detail.source} />
+          )}
+          {detail?.requires && <Detail.Metadata.Label title="Requires" text={detail.requires} />}
+          {detail?.level && <Detail.Metadata.Label title="Level" text={detail.level} />}
+          {detail?.bind && <Detail.Metadata.Label title="Bind" text={detail.bind} />}
+          {detail?.itemType && <Detail.Metadata.Label title="Item Type" text={detail.itemType} />}
+          {detail?.sellPrice && <Detail.Metadata.Label title="Sell Price" text={detail.sellPrice} />}
           <Detail.Metadata.Separator />
           <Detail.Metadata.Label title="Path" text={result.path} />
-          <Detail.Metadata.Link title="Wowhead" text={result.url} target={result.url} />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Link title="Open Wowhead" text="Retail" target={result.url} />
+          <Detail.Metadata.Link title="Comments" text="#comments" target={commentsUrl} />
+          <Detail.Metadata.Link
+            title="Screenshots"
+            text={screenshotsLinkText}
+            target={screenshotsUrl}
+          />
+          <Detail.Metadata.Link title="Related" text="#related" target={relatedUrl} />
         </Detail.Metadata>
       }
     />

@@ -8,6 +8,7 @@ import type {
 
 const SEARCH_TIMEOUT_MS = 10_000;
 const ICON_TIMEOUT_MS = 2_500;
+const DETAIL_PAGE_TIMEOUT_MS = 6_500;
 const RESULT_LIMIT = 120;
 const ICON_LOOKUP_RESULT_LIMIT = 32;
 const NETHER_BASE_URL = "https://nether.wowhead.com";
@@ -57,6 +58,10 @@ type ListviewConfig = {
 
 const iconCache = new Map<string, string | null>();
 const detailCache = new Map<string, WowheadEntityDetail | null>();
+const engagementCache = new Map<
+  string,
+  { commentCount?: number; screenshotCount?: number }
+>();
 
 type TooltipPayload = {
   name?: string;
@@ -327,20 +332,8 @@ function escapeHtml(input: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderTooltipLine(text: string, color?: string): string {
-  if (!color) {
-    return text;
-  }
-
-  return `<span style="color: ${color}">${text}</span>`;
-}
-
-function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
-  if (!html) {
-    return undefined;
-  }
-
-  const normalized = html
+function normalizeTooltipHtml(html: string): string {
+  return html
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<\s*\/\s*table\s*>/gi, "\n")
     .replace(/<\s*table[^>]*>/gi, "\n")
@@ -358,6 +351,127 @@ function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
     .replace(/<\s*li[^>]*>/gi, "- ")
     .replace(/<\s*\/\s*li\s*>/gi, "\n")
     .replace(/\r/g, "");
+}
+
+function tooltipLines(html: string): Array<{ raw: string; text: string }> {
+  return normalizeTooltipHtml(html)
+    .split("\n")
+    .map((rawLine) => {
+      const text = decodeHtmlEntities(rawLine)
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      return {
+        raw: rawLine,
+        text,
+      };
+    })
+    .filter((line) => line.text.length > 0);
+}
+
+function firstLineMatching(lines: string[], pattern: RegExp): string | undefined {
+  return lines.find((line) => pattern.test(line));
+}
+
+function extractSellPrice(tooltipHtml: string | undefined): string | undefined {
+  if (!tooltipHtml) {
+    return undefined;
+  }
+
+  const block = tooltipHtml.match(
+    /<div[^>]*class="[^"]*whtt-sellprice[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+  )?.[1];
+  if (!block) {
+    return undefined;
+  }
+
+  const gold = block.match(/class="[^"]*moneygold[^"]*"[^>]*>(\d+)/i)?.[1];
+  const silver = block.match(/class="[^"]*moneysilver[^"]*"[^>]*>(\d+)/i)?.[1];
+  const copper = block.match(/class="[^"]*moneycopper[^"]*"[^>]*>(\d+)/i)?.[1];
+
+  const parts = [
+    gold ? `${gold}g` : undefined,
+    silver ? `${silver}s` : undefined,
+    copper ? `${copper}c` : undefined,
+  ].filter((part): part is string => part !== undefined);
+
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function extractSourceInfo(tooltipHtml: string | undefined): {
+  source?: string;
+  sourceUrl?: string;
+} {
+  if (!tooltipHtml) {
+    return {};
+  }
+
+  const lines = tooltipLines(tooltipHtml);
+  const sourceLine = lines.find((line) =>
+    /^(Dropped by|Reward from|Sold by|Created by|Starts|Provided by|Contains|Found in|Teaches)/i.test(
+      line.text,
+    ),
+  );
+
+  if (!sourceLine) {
+    return {};
+  }
+
+  const href = sourceLine.raw.match(/<a[^>]*href="(\/[^"]+)"/i)?.[1];
+  return {
+    source: sourceLine.text,
+    sourceUrl: href ? `${WOWHEAD_BASE_URL}${href}` : undefined,
+  };
+}
+
+function extractTooltipFacts(tooltipHtml: string | undefined): {
+  requires?: string;
+  level?: string;
+  bind?: string;
+  itemType?: string;
+  sellPrice?: string;
+} {
+  if (!tooltipHtml) {
+    return {};
+  }
+
+  const lines = tooltipLines(tooltipHtml).map((line) => line.text);
+  const requires = firstLineMatching(lines, /^Requires\b/i);
+  const level =
+    firstLineMatching(lines, /^Item Level\s+\d+/i) ??
+    firstLineMatching(lines, /^Level\s+\d+/i);
+  const bind = firstLineMatching(
+    lines,
+    /^(Binds when picked up|Binds when equipped|Binds to account|Warbound|Soulbound)/i,
+  );
+  const itemType = firstLineMatching(
+    lines,
+    /^(One-Hand|Two-Hand|Main Hand|Off Hand|Ranged|Held In Off-hand|Sword|Axe|Mace|Dagger|Staff|Polearm|Bow|Crossbow|Gun|Wand|Fist Weapon|Shield|Cloth|Leather|Mail|Plate)\b/i,
+  );
+
+  return {
+    requires,
+    level,
+    bind,
+    itemType,
+    sellPrice: extractSellPrice(tooltipHtml),
+  };
+}
+
+function renderTooltipLine(text: string, color?: string): string {
+  if (!color) {
+    return text;
+  }
+
+  return `<span style="color: ${color}">${text}</span>`;
+}
+
+function tooltipHtmlToMarkdown(html: string | undefined): string | undefined {
+  if (!html) {
+    return undefined;
+  }
+
+  const normalized = normalizeTooltipHtml(html);
 
   const renderedLines = normalized
     .split("\n")
@@ -443,6 +557,123 @@ async function fetchTooltipIcon(result: WowheadResult): Promise<string | undefin
   return iconUrl;
 }
 
+function extractArrayLiteral(html: string, variableName: string): string | undefined {
+  const marker = `var ${variableName} = `;
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex === -1) {
+    return undefined;
+  }
+
+  const start = html.indexOf("[", markerIndex + marker.length);
+  if (start === -1) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let quote = "";
+  let escaped = false;
+
+  for (let i = start; i < html.length; i += 1) {
+    const char = html[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (char === quote) {
+        inString = false;
+        quote = "";
+      }
+
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      quote = char;
+      continue;
+    }
+
+    if (char === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(start, i + 1);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function extractArrayCountByPrefix(html: string, prefix: string): number | undefined {
+  const match = html.match(new RegExp(`var\\s+(${prefix}\\d*)\\s*=\\s*\\[`, "i"));
+  if (!match || !match[1]) {
+    return undefined;
+  }
+
+  const arrayLiteral = extractArrayLiteral(html, match[1]);
+  if (!arrayLiteral) {
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(arrayLiteral);
+    return Array.isArray(parsed) ? parsed.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function fetchWowheadEngagementCounts(
+  result: WowheadResult,
+): Promise<{ commentCount?: number; screenshotCount?: number }> {
+  if (!result.entityId) {
+    return {};
+  }
+
+  const cacheKey = `${result.type}:${result.entityId}`;
+  const cached = engagementCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const response = await fetch(result.url, {
+      signal: AbortSignal.timeout(DETAIL_PAGE_TIMEOUT_MS),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+      },
+    });
+
+    if (response.ok === false) {
+      return {};
+    }
+
+    const html = await response.text();
+    const next = {
+      commentCount: extractArrayCountByPrefix(html, "lv_comments"),
+      screenshotCount: extractArrayCountByPrefix(html, "lv_screenshots"),
+    };
+
+    engagementCache.set(cacheKey, next);
+    return next;
+  } catch {
+    return {};
+  }
+}
+
 export async function fetchWowheadEntityDetail(
   result: WowheadResult,
 ): Promise<WowheadEntityDetail | undefined> {
@@ -457,6 +688,7 @@ export async function fetchWowheadEntityDetail(
   }
 
   const payload = await fetchTooltipPayload(result);
+
   if (!payload) {
     detailCache.set(cacheKey, null);
     return undefined;
@@ -471,6 +703,8 @@ export async function fetchWowheadEntityDetail(
     iconCache.set(cacheKey, iconUrl);
   }
 
+  const cachedEngagement = engagementCache.get(cacheKey);
+
   const detail: WowheadEntityDetail = {
     name:
       typeof payload.name === "string" && payload.name.trim().length > 0
@@ -478,6 +712,10 @@ export async function fetchWowheadEntityDetail(
         : result.title,
     iconUrl,
     quality: typeof payload.quality === "number" ? payload.quality : undefined,
+    commentCount: cachedEngagement?.commentCount,
+    screenshotCount: cachedEngagement?.screenshotCount,
+    ...extractSourceInfo(payload.tooltip),
+    ...extractTooltipFacts(payload.tooltip),
     tooltipHtml:
       typeof payload.tooltip === "string" && payload.tooltip.trim().length > 0
         ? payload.tooltip

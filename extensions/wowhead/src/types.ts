@@ -17,6 +17,15 @@ export type WowheadEntityDetail = {
   name: string;
   iconUrl?: string;
   quality?: number;
+  commentCount?: number;
+  screenshotCount?: number;
+  source?: string;
+  sourceUrl?: string;
+  requires?: string;
+  level?: string;
+  bind?: string;
+  itemType?: string;
+  sellPrice?: string;
   tooltipHtml?: string;
   secondaryTooltipHtml?: string;
   tooltipSvgDataUrl?: string;
