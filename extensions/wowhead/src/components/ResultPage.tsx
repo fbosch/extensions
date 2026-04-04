@@ -24,6 +24,17 @@ const QUALITY_LABELS: Record<number, string> = {
   7: "Heirloom",
 };
 
+const QUALITY_TAG_COLORS: Record<number, string> = {
+  0: "#9d9d9d",
+  1: "#ffffff",
+  2: "#1eff00",
+  3: "#0070dd",
+  4: "#a335ee",
+  5: "#ff8000",
+  6: "#e6cc80",
+  7: "#00ccff",
+};
+
 function buildGuideMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
   const heading = detail?.name ?? result.title;
   const sections = [
@@ -174,11 +185,12 @@ export function ResultPage({ result }: { result: WowheadResult }) {
           <Detail.Metadata.Label title="Type" text={result.typeLabel} />
           {result.entityId && <Detail.Metadata.Label title="ID" text={result.entityId} />}
           {detail?.quality !== undefined && (
-            <Detail.Metadata.Label
-              title="Quality"
-              text={QUALITY_LABELS[detail.quality] ?? `Quality ${detail.quality}`}
-              icon={{ source: Icon.Star }}
-            />
+            <Detail.Metadata.TagList title="Quality">
+              <Detail.Metadata.TagList.Item
+                text={QUALITY_LABELS[detail.quality] ?? `Quality ${detail.quality}`}
+                color={QUALITY_TAG_COLORS[detail.quality] ?? "#c7c7cf"}
+              />
+            </Detail.Metadata.TagList>
           )}
           {detail?.sourceUrl ? (
             <Detail.Metadata.Link title="Source" text={detail.source ?? "Open Source"} target={detail.sourceUrl} />
