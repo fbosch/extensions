@@ -792,6 +792,24 @@ function renderTooltipLine(text: string, color?: string): string {
   return `<span style="color: ${color}">${text}</span>`;
 }
 
+function normalizeMoneySpans(rawLine: string): string {
+  return rawLine
+    .replace(
+      /<span[^>]*class="[^"]*moneygold[^"]*"[^>]*>(\d+)<\/span>/gi,
+      "$1g",
+    )
+    .replace(
+      /<span[^>]*class="[^"]*moneysilver[^"]*"[^>]*>(\d+)<\/span>/gi,
+      "$1s",
+    )
+    .replace(
+      /<span[^>]*class="[^"]*moneycopper[^"]*"[^>]*>(\d+)<\/span>/gi,
+      "$1c",
+    )
+    .replace(/(\d+[gsc])(\d+[gsc])/gi, "$1 $2")
+    .replace(/\s{2,}/g, " ");
+}
+
 function tooltipHtmlToMarkdown(
   html: string | undefined,
   entityType: EntityKind,
@@ -806,7 +824,7 @@ function tooltipHtmlToMarkdown(
     .split("\n")
     .map((rawLine) => {
       const color = colorFromTooltipLine(rawLine);
-      const plainText = decodeHtmlEntities(rawLine)
+      const plainText = decodeHtmlEntities(normalizeMoneySpans(rawLine))
         .replace(/<[^>]+>/g, "")
         .replace(/\s{2,}/g, " ")
         .trim();
