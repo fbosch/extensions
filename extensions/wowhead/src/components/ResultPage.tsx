@@ -11,6 +11,7 @@ import {
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
 import { fetchWowheadEngagementCounts, fetchWowheadEntityDetail } from "../api";
+import { buildResultMarkdown } from "./result-page/markdown";
 import type { WowheadEntityDetail, WowheadResult } from "../types";
 
 const QUALITY_LABELS: Record<number, string> = {
@@ -35,51 +36,17 @@ const QUALITY_TAG_COLORS: Record<number, string> = {
   7: "#00ccff",
 };
 
-function buildGuideMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
-  const heading = detail?.name ?? result.title;
-  const sections = [
-    detail?.guideBannerUrl ? `![${heading} Banner](${detail.guideBannerUrl})` : undefined,
-    `# ${heading}`,
-    detail?.guideAuthor ? `**Guide by:** ${detail.guideAuthor}` : undefined,
-    detail?.guideCategory || detail?.guidePatch
-      ? `**${[detail?.guideCategory, detail?.guidePatch].filter(Boolean).join(" | ")}**`
-      : undefined,
-    detail?.guideDescription ?? detail?.guidePreviewMarkdown,
-    `[Open guide on Wowhead](${result.url})`,
-  ].filter((section): section is string => section !== undefined);
-
-  return sections.join("\n\n");
-}
-
-function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
-  if (result.type === "guide") {
-    return buildGuideMarkdown(result, detail);
-  }
-
-  const heading = detail?.name ?? result.title;
-  const primaryTooltip = detail?.tooltipMarkdown?.trim();
-  const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
-  const primaryTooltipWithExtraBreak = primaryTooltip?.replace(/<br\s*\/?>/i, "<br/><br/>");
-  const primaryTooltipWithIcon =
-    detail?.iconUrl && primaryTooltipWithExtraBreak
-      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:0;" />&nbsp;&nbsp;${primaryTooltipWithExtraBreak}</span>`
-      : primaryTooltipWithExtraBreak;
-  const hasTooltip =
-    (primaryTooltipWithIcon?.length ?? 0) > 0 ||
-    (secondaryTooltip?.length ?? 0) > 0;
-
-  const sections = [
-    hasTooltip === false ? `# ${heading}` : undefined,
-    primaryTooltipWithIcon,
-    secondaryTooltip,
-  ].filter((section): section is string => section !== undefined);
-
-  return sections.join("\n\n");
-}
-
-export function ResultPage({ result }: { result: WowheadResult }) {
-  const [detail, setDetail] = useState<WowheadEntityDetail | undefined>();
-  const [isLoading, setIsLoading] = useState(result.entityId !== undefined);
+export function ResultPage({
+  result,
+  initialDetail,
+}: {
+  result: WowheadResult;
+  initialDetail?: WowheadEntityDetail;
+}) {
+  const [detail, setDetail] = useState<WowheadEntityDetail | undefined>(initialDetail);
+  const [isLoading, setIsLoading] = useState(
+    result.entityId !== undefined && initialDetail === undefined,
+  );
   const [engagement, setEngagement] = useState<{
     commentCount?: number;
     screenshotCount?: number;
@@ -90,6 +57,11 @@ export function ResultPage({ result }: { result: WowheadResult }) {
 
     if (result.entityId === undefined) {
       setDetail(undefined);
+      setIsLoading(false);
+      return;
+    }
+
+    if (initialDetail) {
       setIsLoading(false);
       return;
     }
@@ -114,7 +86,7 @@ export function ResultPage({ result }: { result: WowheadResult }) {
     return () => {
       isMounted = false;
     };
-  }, [result]);
+  }, [result, initialDetail]);
 
   useEffect(() => {
     let isMounted = true;
@@ -129,7 +101,10 @@ export function ResultPage({ result }: { result: WowheadResult }) {
         return;
       }
 
-      setEngagement(next);
+      setEngagement({
+        commentCount: next.commentCount,
+        screenshotCount: next.screenshotCount,
+      });
     });
 
     return () => {
@@ -151,7 +126,7 @@ export function ResultPage({ result }: { result: WowheadResult }) {
   return (
     <Detail
       navigationTitle={result.title}
-      markdown={isLoading ? "Loading details..." : buildMarkdown(result, detail)}
+      markdown={isLoading ? "" : buildResultMarkdown(result, detail)}
       actions={
         <ActionPanel>
           <Action

@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/vicinaehq/vicinae/refs/heads/main/extra/schemas/extension.json",
   "name": "wowhead",
   "title": "Wowhead",
-  "description": "Browse retail Wowhead search results from Vicinae",
+  "description": "Browse Wowhead search results from Vicinae",
   "categories": [
     "Web",
     "Fun"
@@ -16,7 +16,7 @@
     {
       "name": "wowhead",
       "title": "Browse Wowhead",
-      "description": "Search retail Wowhead entities",
+      "description": "Search Wowhead entities",
       "mode": "view"
     }
   ],

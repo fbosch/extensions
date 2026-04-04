@@ -13,6 +13,14 @@ export type WowheadResult = {
   iconUrl?: string;
 };
 
+export type WowheadCommentPreview = {
+  id: number;
+  author: string;
+  body: string;
+  rating?: number;
+  date?: string;
+};
+
 export type WowheadEntityDetail = {
   name: string;
   iconUrl?: string;
@@ -36,10 +44,10 @@ export type WowheadEntityDetail = {
   guidePatch?: string;
   guideDescription?: string;
   guidePreviewMarkdown?: string;
+  highlightedScreenshotUrl?: string;
+  topComments?: WowheadCommentPreview[];
   tooltipHtml?: string;
   secondaryTooltipHtml?: string;
-  tooltipSvgDataUrl?: string;
-  secondaryTooltipSvgDataUrl?: string;
   tooltipMarkdown?: string;
   secondaryTooltipMarkdown?: string;
 };

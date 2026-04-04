@@ -1,6 +1,6 @@
 import { WOWHEAD_BASE_URL } from "./constants";
-import { buildTooltipSvgDataUrl } from "./tooltipSvg";
 import type {
+  WowheadCommentPreview,
   WowheadEntityDetail,
   WowheadEntityType,
   WowheadResult,
@@ -8,11 +8,19 @@ import type {
 
 const SEARCH_TIMEOUT_MS = 10_000;
 const ICON_TIMEOUT_MS = 2_500;
+const QUEST_ICON_TIMEOUT_MS = 4_500;
 const DETAIL_PAGE_TIMEOUT_MS = 6_500;
 const RESULT_LIMIT = 120;
 const ICON_LOOKUP_RESULT_LIMIT = 32;
 const NETHER_BASE_URL = "https://nether.wowhead.com";
 const WOW_ICON_BASE_URL = "https://wow.zamimg.com/images/wow/icons/large";
+const WOW_QUEST_ATLAS_BASE_URL =
+  "https://wow.zamimg.com/images/wow/TextureAtlas/live";
+const WOW_QUEST_TYPE_ICONS = {
+  important: `${WOW_QUEST_ATLAS_BASE_URL}/quest-important-available.png`,
+  campaign: `${WOW_QUEST_ATLAS_BASE_URL}/quest-campaign-available.png`,
+  regular: `${WOW_QUEST_ATLAS_BASE_URL}/questnormal.png`,
+} as const;
 
 const TYPE_LABELS: Record<Exclude<WowheadEntityType, "all">, string> = {
   item: "Item",
@@ -49,6 +57,7 @@ type SearchRecord = {
   title?: string;
   searchpopularity?: number;
   image?: string;
+  icon?: string;
 };
 
 type ListviewConfig = {
@@ -60,7 +69,12 @@ const iconCache = new Map<string, string | null>();
 const detailCache = new Map<string, WowheadEntityDetail | null>();
 const engagementCache = new Map<
   string,
-  { commentCount?: number; screenshotCount?: number }
+    {
+      commentCount?: number;
+      screenshotCount?: number;
+      highlightedScreenshotUrl?: string;
+      topComments?: WowheadCommentPreview[];
+    }
 >();
 
 type TooltipPayload = {
@@ -198,6 +212,9 @@ function createResult(
     entityId: String(record.id),
     path,
     iconUrl:
+      type === "quest" && typeof record.icon === "string"
+        ? mapQuestIconToken(record.icon)
+        :
       type === "guide" && typeof record.image === "string"
         ? record.image
         : undefined,
@@ -274,6 +291,75 @@ function extractResultsFromListviews(html: string): WowheadResult[] {
 
 function buildWowIconUrl(iconName: string): string {
   return `${WOW_ICON_BASE_URL}/${iconName.toLowerCase()}.jpg`;
+}
+
+function mapQuestIconToken(icon: string): string | undefined {
+  const value = icon.trim().toLowerCase();
+
+  if (value.includes("important")) {
+    return WOW_QUEST_TYPE_ICONS.important;
+  }
+
+  if (value.includes("campaign")) {
+    return WOW_QUEST_TYPE_ICONS.campaign;
+  }
+
+  if (value.includes("quest") || value.includes("normal") || value.includes("start")) {
+    return WOW_QUEST_TYPE_ICONS.regular;
+  }
+
+  return undefined;
+}
+
+function detectQuestTypeIconFromPageHtml(html: string): string | undefined {
+  const normalized = html.toLowerCase();
+
+  if (
+    normalized.includes("quest-important-available") ||
+    normalized.includes("quest-start-important")
+  ) {
+    return WOW_QUEST_TYPE_ICONS.important;
+  }
+
+  if (
+    normalized.includes("quest-campaign-available") ||
+    normalized.includes("quest-start-campaign")
+  ) {
+    return WOW_QUEST_TYPE_ICONS.campaign;
+  }
+
+  if (
+    normalized.includes("questnormal") ||
+    normalized.includes("quest-start")
+  ) {
+    return WOW_QUEST_TYPE_ICONS.regular;
+  }
+
+  return undefined;
+}
+
+async function fetchQuestTypeIcon(result: WowheadResult): Promise<string | undefined> {
+  if (result.type !== "quest" || !result.entityId) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch(`${WOWHEAD_BASE_URL}/quest=${result.entityId}`, {
+      signal: AbortSignal.timeout(QUEST_ICON_TIMEOUT_MS),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+      },
+    });
+
+    if (response.ok === false) {
+      return undefined;
+    }
+
+    const html = await response.text();
+    return detectQuestTypeIconFromPageHtml(html);
+  } catch {
+    return undefined;
+  }
 }
 
 function decodeHtmlEntities(input: string): string {
@@ -891,6 +977,14 @@ async function fetchTooltipIcon(result: WowheadResult): Promise<string | undefin
     return cached ?? undefined;
   }
 
+  if (result.type === "quest") {
+    const questTypeIcon = await fetchQuestTypeIcon(result);
+    if (questTypeIcon) {
+      iconCache.set(cacheKey, questTypeIcon);
+      return questTypeIcon;
+    }
+  }
+
   const payload = await fetchTooltipPayload(result);
   if (
     !payload ||
@@ -985,9 +1079,137 @@ function extractArrayCountByPrefix(html: string, prefix: string): number | undef
   }
 }
 
+function buildScreenshotUrlById(id: number): string {
+  return `https://wow.zamimg.com/uploads/screenshots/normal/${id}.jpg`;
+}
+
+function normalizeWowheadCommentBody(input: string): string {
+  return decodeHtmlEntities(input)
+    .replace(/\r/g, "")
+    .replace(/\[url=([^\]]+)\]([\s\S]*?)\[\/url\]/gi, "$2 ($1)")
+    .replace(/\[li\]/gi, "- ")
+    .replace(/\[\/li\]/gi, "\n")
+    .replace(/\[\/?ul\]/gi, "")
+    .replace(/\[[a-z]+(?:=[^\]]+)?\]/gi, "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .trim();
+}
+
+function extractTopComments(html: string, limit: number): WowheadCommentPreview[] | undefined {
+  const match = html.match(/var\s+(lv_comments\d*)\s*=\s*\[/i);
+  if (!match || !match[1]) {
+    return undefined;
+  }
+
+  const arrayLiteral = extractArrayLiteral(html, match[1]);
+  if (!arrayLiteral) {
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(arrayLiteral);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return undefined;
+    }
+
+    const comments = parsed
+      .filter((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return false;
+        }
+
+        const row = entry as Record<string, unknown>;
+        if (row.deleted === true) {
+          return false;
+        }
+
+        if (typeof row.rating === "number" && row.rating < 0) {
+          return false;
+        }
+
+        return typeof row.id === "number" && typeof row.body === "string";
+      })
+      .slice(0, limit)
+      .map((entry) => {
+        const row = entry as Record<string, unknown>;
+        return {
+          id: row.id as number,
+          author: typeof row.user === "string" ? row.user : "Unknown",
+          body: normalizeWowheadCommentBody(row.body as string),
+          rating: typeof row.rating === "number" ? row.rating : undefined,
+          date: typeof row.date === "string" ? row.date : undefined,
+        };
+      })
+      .filter((entry) => entry.body.length > 0);
+
+    return comments.length > 0 ? comments : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractHighlightedScreenshotUrl(html: string): string | undefined {
+  const ogImage = extractMetaContent(html, "property", "og:image");
+  if (
+    ogImage &&
+    /wow\.zamimg\.com\/uploads\/screenshots\/normal\//i.test(ogImage)
+  ) {
+    return ogImage;
+  }
+
+  const match = html.match(/var\s+(lv_screenshots\d*)\s*=\s*\[/i);
+  if (!match || !match[1]) {
+    return undefined;
+  }
+
+  const arrayLiteral = extractArrayLiteral(html, match[1]);
+  if (!arrayLiteral) {
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(arrayLiteral);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return undefined;
+    }
+
+    const highlighted = parsed.find((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return false;
+      }
+
+      const candidate = entry as Record<string, unknown>;
+      return (
+        candidate.highlighted === true ||
+        candidate.featured === true ||
+        candidate.pinned === true ||
+        candidate.sticky === true
+      );
+    });
+
+    const row = (highlighted ?? parsed[0]) as Record<string, unknown>;
+    const id = typeof row.id === "number" ? row.id : undefined;
+    if (!id) {
+      return undefined;
+    }
+
+    return buildScreenshotUrlById(id);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchWowheadEngagementCounts(
   result: WowheadResult,
-): Promise<{ commentCount?: number; screenshotCount?: number }> {
+): Promise<{
+  commentCount?: number;
+  screenshotCount?: number;
+  highlightedScreenshotUrl?: string;
+  topComments?: WowheadCommentPreview[];
+}> {
   if (!result.entityId) {
     return {};
   }
@@ -995,7 +1217,15 @@ export async function fetchWowheadEngagementCounts(
   const cacheKey = `${result.type}:${result.entityId}`;
   const cached = engagementCache.get(cacheKey);
   if (cached) {
-    return cached;
+    if (
+      result.type === "quest" &&
+      cached.highlightedScreenshotUrl === undefined &&
+      cached.topComments === undefined
+    ) {
+      engagementCache.delete(cacheKey);
+    } else {
+      return cached;
+    }
   }
 
   try {
@@ -1014,6 +1244,8 @@ export async function fetchWowheadEngagementCounts(
     const next = {
       commentCount: extractArrayCountByPrefix(html, "lv_comments"),
       screenshotCount: extractArrayCountByPrefix(html, "lv_screenshots"),
+      highlightedScreenshotUrl: extractHighlightedScreenshotUrl(html),
+      topComments: result.type === "quest" ? extractTopComments(html, 3) : undefined,
     };
 
     engagementCache.set(cacheKey, next);
@@ -1033,7 +1265,16 @@ export async function fetchWowheadEntityDetail(
   const cacheKey = `${result.type}:${result.entityId}`;
   const cached = detailCache.get(cacheKey);
   if (cached !== undefined) {
-    return cached ?? undefined;
+    if (
+      result.type === "quest" &&
+      cached &&
+      cached.highlightedScreenshotUrl === undefined &&
+      cached.topComments === undefined
+    ) {
+      detailCache.delete(cacheKey);
+    } else {
+      return cached ?? undefined;
+    }
   }
 
   const payload = await fetchTooltipPayload(result);
@@ -1052,7 +1293,10 @@ export async function fetchWowheadEntityDetail(
     iconCache.set(cacheKey, iconUrl);
   }
 
-  const cachedEngagement = engagementCache.get(cacheKey);
+  const cachedEngagement =
+    result.type === "quest"
+      ? await fetchWowheadEngagementCounts(result)
+      : engagementCache.get(cacheKey);
   const guideFacts = extractGuideTooltipFacts(payload.tooltip);
   const guidePageSummary = await fetchGuidePageSummary(result);
 
@@ -1065,6 +1309,8 @@ export async function fetchWowheadEntityDetail(
     quality: typeof payload.quality === "number" ? payload.quality : undefined,
     commentCount: cachedEngagement?.commentCount,
     screenshotCount: cachedEngagement?.screenshotCount,
+    highlightedScreenshotUrl: cachedEngagement?.highlightedScreenshotUrl,
+    topComments: cachedEngagement?.topComments,
     ...extractSourceInfo(result.type, payload.tooltip),
     ...extractTooltipFacts(result.type, payload.tooltip),
     ...guideFacts,
@@ -1079,31 +1325,6 @@ export async function fetchWowheadEntityDetail(
         : undefined,
     tooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip, result.type),
     secondaryTooltipMarkdown: tooltipHtmlToMarkdown(payload.tooltip2, result.type),
-    tooltipSvgDataUrl: buildTooltipSvgDataUrl({
-      title:
-        typeof payload.name === "string" && payload.name.trim().length > 0
-          ? payload.name.trim()
-          : result.title,
-      quality: typeof payload.quality === "number" ? payload.quality : undefined,
-      iconUrl,
-      tooltipHtml:
-        typeof payload.tooltip === "string" && payload.tooltip.trim().length > 0
-          ? payload.tooltip
-          : undefined,
-    }),
-    secondaryTooltipSvgDataUrl: buildTooltipSvgDataUrl({
-      title: `${
-        typeof payload.name === "string" && payload.name.trim().length > 0
-          ? payload.name.trim()
-          : result.title
-      } (Additional)`,
-      quality: typeof payload.quality === "number" ? payload.quality : undefined,
-      iconUrl,
-      tooltipHtml:
-        typeof payload.tooltip2 === "string" && payload.tooltip2.trim().length > 0
-          ? payload.tooltip2
-          : undefined,
-    }),
   };
 
   detailCache.set(cacheKey, detail);

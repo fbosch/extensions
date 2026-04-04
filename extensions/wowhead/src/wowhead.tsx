@@ -10,9 +10,10 @@ import {
   open,
   showToast,
   Toast,
+  useNavigation,
 } from "@vicinae/api";
 import { useDeferredValue, useMemo, useState } from "react";
-import { searchWowhead } from "./api";
+import { fetchWowheadEntityDetail, searchWowhead } from "./api";
 import { ResultPage } from "./components/ResultPage";
 import {
   CACHE_MAX_AGE_MS,
@@ -48,6 +49,7 @@ async function openResultInBrowser(result: WowheadResult): Promise<void> {
 }
 
 function WowheadCommand() {
+  const { push } = useNavigation();
   const [searchText, setSearchText] = useState("");
   const [entityType, setEntityType] = useState<WowheadEntityType>("all");
   const deferredSearch = useDeferredValue(searchText);
@@ -125,11 +127,14 @@ function WowheadCommand() {
               accessories={[{ text: result.typeLabel }]}
               actions={
                 <ActionPanel>
-                  <Action.Push
+                  <Action
                     title="Open Full Detail"
                     icon={Icon.AppWindowSidebarRight}
                     shortcut={Keyboard.Shortcut.Common.Open}
-                    target={<ResultPage result={result} />}
+                    onAction={async () => {
+                      const detail = await fetchWowheadEntityDetail(result);
+                      push(<ResultPage result={result} initialDetail={detail} />);
+                    }}
                   />
                   <Action
                     title="Open on Wowhead"
