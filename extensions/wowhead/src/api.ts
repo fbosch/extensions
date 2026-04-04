@@ -640,6 +640,114 @@ function extractQuestTooltipFacts(tooltipHtml: string | undefined): {
   };
 }
 
+function extractGuideTooltipFacts(tooltipHtml: string | undefined): {
+  guideAuthor?: string;
+  guideCategory?: string;
+  guidePatch?: string;
+  guidePreviewMarkdown?: string;
+} {
+  if (!tooltipHtml) {
+    return {};
+  }
+
+  const lines = tooltipLines(tooltipHtml, "guide").map((line) => line.text);
+
+  const author = lines
+    .map((line) => line.match(/^Wowhead Guide\s+By\s+(.+)$/i)?.[1]?.trim())
+    .find((value): value is string => Boolean(value));
+
+  const categoryPatchLine = lines.find((line) => /\bPatch\s+[0-9]+(?:\.[0-9]+)*/i.test(line));
+  const patch = categoryPatchLine?.match(/Patch\s+[0-9]+(?:\.[0-9]+)*/i)?.[0];
+  const category = categoryPatchLine
+    ?.replace(/\bPatch\s+[0-9]+(?:\.[0-9]+)*/i, "")
+    .trim();
+
+  const previewLines = lines.filter((line) => {
+    if (line === author || line === categoryPatchLine) {
+      return false;
+    }
+
+    if (/^Wowhead Guide\s+By\s+/i.test(line)) {
+      return false;
+    }
+
+    if (/\bPatch\s+[0-9]+(?:\.[0-9]+)*/i.test(line) && line.length < 40) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const guidePreviewMarkdown = previewLines
+    .slice(1, 4)
+    .map((line) => escapeHtml(line))
+    .join("<br/><br/>")
+    .trim();
+
+  return {
+    guideAuthor: author,
+    guideCategory: category || undefined,
+    guidePatch: patch,
+    guidePreviewMarkdown: guidePreviewMarkdown.length > 0 ? guidePreviewMarkdown : undefined,
+  };
+}
+
+function extractMetaContent(
+  html: string,
+  attrName: "property" | "name",
+  attrValue: string,
+): string | undefined {
+  const escapedAttr = attrValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(
+    `<meta[^>]*${attrName}="${escapedAttr}"[^>]*content="([^"]+)"[^>]*>`,
+    "i",
+  );
+  const match = html.match(regex)?.[1];
+  if (!match) {
+    return undefined;
+  }
+
+  const decoded = decodeHtmlEntities(match).trim();
+  return decoded.length > 0 ? decoded : undefined;
+}
+
+async function fetchGuidePageSummary(
+  result: WowheadResult,
+): Promise<{ guideBannerUrl?: string; guideDescription?: string }> {
+  if (result.type !== "guide") {
+    return {};
+  }
+
+  try {
+    const response = await fetch(result.url, {
+      signal: AbortSignal.timeout(DETAIL_PAGE_TIMEOUT_MS),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+      },
+      redirect: "follow",
+    });
+
+    if (response.ok === false) {
+      return {};
+    }
+
+    const html = await response.text();
+    const guideBannerUrl =
+      extractMetaContent(html, "property", "og:image") ??
+      extractMetaContent(html, "name", "twitter:image");
+    const guideDescription =
+      extractMetaContent(html, "property", "og:description") ??
+      extractMetaContent(html, "name", "description");
+
+    return {
+      guideBannerUrl,
+      guideDescription,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function extractTooltipFacts(
   entityType: EntityKind,
   tooltipHtml: string | undefined,
@@ -927,6 +1035,8 @@ export async function fetchWowheadEntityDetail(
   }
 
   const cachedEngagement = engagementCache.get(cacheKey);
+  const guideFacts = extractGuideTooltipFacts(payload.tooltip);
+  const guidePageSummary = await fetchGuidePageSummary(result);
 
   const detail: WowheadEntityDetail = {
     name:
@@ -939,6 +1049,8 @@ export async function fetchWowheadEntityDetail(
     screenshotCount: cachedEngagement?.screenshotCount,
     ...extractSourceInfo(result.type, payload.tooltip),
     ...extractTooltipFacts(result.type, payload.tooltip),
+    ...guideFacts,
+    ...guidePageSummary,
     tooltipHtml:
       typeof payload.tooltip === "string" && payload.tooltip.trim().length > 0
         ? payload.tooltip

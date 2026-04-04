@@ -30,6 +30,12 @@ export type WowheadEntityDetail = {
   range?: string;
   cost?: string;
   cooldown?: string;
+  guideBannerUrl?: string;
+  guideAuthor?: string;
+  guideCategory?: string;
+  guidePatch?: string;
+  guideDescription?: string;
+  guidePreviewMarkdown?: string;
   tooltipHtml?: string;
   secondaryTooltipHtml?: string;
   tooltipSvgDataUrl?: string;

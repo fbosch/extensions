@@ -3,7 +3,27 @@ import { List } from "@vicinae/api";
 import { fetchWowheadEntityDetail } from "../api";
 import type { WowheadEntityDetail, WowheadResult } from "../types";
 
+function buildGuideMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
+  const heading = detail?.name ?? result.title;
+  const sections = [
+    detail?.guideBannerUrl ? `![${heading} Banner](${detail.guideBannerUrl})` : undefined,
+    `# ${heading}`,
+    detail?.guideAuthor ? `**Guide by:** ${detail.guideAuthor}` : undefined,
+    detail?.guideCategory || detail?.guidePatch
+      ? `**${[detail?.guideCategory, detail?.guidePatch].filter(Boolean).join(" | ")}**`
+      : undefined,
+    detail?.guideDescription ?? detail?.guidePreviewMarkdown,
+    `[Open guide on Wowhead](${result.url})`,
+  ].filter((section): section is string => section !== undefined);
+
+  return sections.join("\n\n");
+}
+
 function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
+  if (result.type === "guide") {
+    return buildGuideMarkdown(result, detail);
+  }
+
   const heading = detail?.name ?? result.title;
   const primaryTooltip = detail?.tooltipMarkdown?.trim();
   const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();

@@ -24,7 +24,27 @@ const QUALITY_LABELS: Record<number, string> = {
   7: "Heirloom",
 };
 
+function buildGuideMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
+  const heading = detail?.name ?? result.title;
+  const sections = [
+    detail?.guideBannerUrl ? `![${heading} Banner](${detail.guideBannerUrl})` : undefined,
+    `# ${heading}`,
+    detail?.guideAuthor ? `**Guide by:** ${detail.guideAuthor}` : undefined,
+    detail?.guideCategory || detail?.guidePatch
+      ? `**${[detail?.guideCategory, detail?.guidePatch].filter(Boolean).join(" | ")}**`
+      : undefined,
+    detail?.guideDescription ?? detail?.guidePreviewMarkdown,
+    `[Open guide on Wowhead](${result.url})`,
+  ].filter((section): section is string => section !== undefined);
+
+  return sections.join("\n\n");
+}
+
 function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): string {
+  if (result.type === "guide") {
+    return buildGuideMarkdown(result, detail);
+  }
+
   const heading = detail?.name ?? result.title;
   const primaryTooltip = detail?.tooltipMarkdown?.trim();
   const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
@@ -165,6 +185,9 @@ export function ResultPage({ result }: { result: WowheadResult }) {
           ) : (
             detail?.source && <Detail.Metadata.Label title="Source" text={detail.source} />
           )}
+          {detail?.guideAuthor && <Detail.Metadata.Label title="Author" text={detail.guideAuthor} />}
+          {detail?.guideCategory && <Detail.Metadata.Label title="Category" text={detail.guideCategory} />}
+          {detail?.guidePatch && <Detail.Metadata.Label title="Patch" text={detail.guidePatch} />}
           {detail?.requires && <Detail.Metadata.Label title="Requires" text={detail.requires} />}
           {detail?.level && <Detail.Metadata.Label title="Level" text={detail.level} />}
           {detail?.bind && <Detail.Metadata.Label title="Bind" text={detail.bind} />}
