@@ -12,7 +12,7 @@ import {
   Toast,
   useNavigation,
 } from "@vicinae/api";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { fetchWowheadEntityDetail, searchWowhead } from "./api";
 import { ResultPage } from "./components/ResultPage";
 import {
@@ -21,6 +21,7 @@ import {
   SEARCH_CACHE_VERSION,
   SEARCH_DEBOUNCE_FALLBACK_TEXT,
 } from "./constants";
+import { addFavorite, isFavoriteResult, readFavorites, removeFavorite } from "./favorites";
 import { persister, queryClient } from "./queryClient";
 import type { WowheadEntityType, WowheadResult } from "./types";
 
@@ -52,7 +53,12 @@ function WowheadCommand() {
   const { push } = useNavigation();
   const [searchText, setSearchText] = useState("");
   const [entityType, setEntityType] = useState<WowheadEntityType>("all");
+  const [favorites, setFavorites] = useState<WowheadResult[]>([]);
   const deferredSearch = useDeferredValue(searchText);
+
+  useEffect(() => {
+    setFavorites(readFavorites());
+  }, []);
 
   const query = useQuery({
     queryKey: [
@@ -67,6 +73,81 @@ function WowheadCommand() {
   });
 
   const results = useMemo(() => query.data ?? [], [query.data]);
+  const favoriteIds = useMemo(() => new Set(favorites.map((entry) => entry.id)), [favorites]);
+
+  async function toggleFavorite(result: WowheadResult): Promise<void> {
+    const isFavorite = isFavoriteResult(result.id, favorites);
+    const next = isFavorite ? removeFavorite(result.id) : addFavorite(result);
+    setFavorites(next);
+
+    await showToast({
+      style: Toast.Style.Success,
+      title: isFavorite ? "Removed from favorites" : "Added to favorites",
+      message: result.title,
+    });
+  }
+
+  function renderResultItem(result: WowheadResult) {
+    const isFavorite = favoriteIds.has(result.id);
+
+    return (
+      <List.Item
+        key={result.id}
+        title={result.title}
+        subtitle={result.entityId ? `ID ${result.entityId}` : result.typeLabel}
+        icon={result.iconUrl ? { source: result.iconUrl } : TYPE_ICONS[result.type]}
+        accessories={[
+          ...(isFavorite ? [{ icon: Icon.Star }] : []),
+          { text: result.typeLabel },
+        ]}
+        actions={
+          <ActionPanel>
+            <Action
+              title="Open Full Detail"
+              icon={Icon.AppWindowSidebarRight}
+              shortcut={Keyboard.Shortcut.Common.Open}
+              onAction={async () => {
+                const detail = await fetchWowheadEntityDetail(result);
+                push(<ResultPage result={result} initialDetail={detail} />);
+              }}
+            />
+            <Action
+              title="Open on Wowhead"
+              icon={Icon.Globe01}
+              onAction={() => openResultInBrowser(result)}
+            />
+            <Action.CopyToClipboard
+              title="Copy URL"
+              content={result.url}
+              shortcut={Keyboard.Shortcut.Common.Copy}
+            />
+            <Action
+              title={isFavorite ? "Remove Favorite" : "Add Favorite"}
+              icon={isFavorite ? Icon.StarDisabled : Icon.Star}
+              shortcut={isFavorite ? Keyboard.Shortcut.Common.Remove : Keyboard.Shortcut.Common.Pin}
+              onAction={() => toggleFavorite(result)}
+            />
+            {deferredSearch.trim().length > 0 && (
+              <Action
+                title="Refresh"
+                icon={Icon.ArrowClockwise}
+                shortcut={Keyboard.Shortcut.Common.Refresh}
+                onAction={async () => {
+                  await queryClient.invalidateQueries({
+                    queryKey: ["wowhead", "search"],
+                  });
+                  await showToast({
+                    style: Toast.Style.Success,
+                    title: "Refreshed results",
+                  });
+                }}
+              />
+            )}
+          </ActionPanel>
+        }
+      />
+    );
+  }
 
   const emptyView = (() => {
     if (deferredSearch.trim().length === 0) {
@@ -116,56 +197,19 @@ function WowheadCommand() {
         </List.Dropdown>
       }
     >
-      {results.length === 0
-        ? emptyView
-        : results.map((result: WowheadResult) => (
-            <List.Item
-              key={result.id}
-              title={result.title}
-              subtitle={result.entityId ? `ID ${result.entityId}` : result.typeLabel}
-              icon={result.iconUrl ? { source: result.iconUrl } : TYPE_ICONS[result.type]}
-              accessories={[{ text: result.typeLabel }]}
-              actions={
-                <ActionPanel>
-                  <Action
-                    title="Open Full Detail"
-                    icon={Icon.AppWindowSidebarRight}
-                    shortcut={Keyboard.Shortcut.Common.Open}
-                    onAction={async () => {
-                      const detail = await fetchWowheadEntityDetail(result);
-                      push(<ResultPage result={result} initialDetail={detail} />);
-                    }}
-                  />
-                  <Action
-                    title="Open on Wowhead"
-                    icon={Icon.Globe01}
-                    onAction={() => openResultInBrowser(result)}
-                  />
-                  <Action.CopyToClipboard
-                    title="Copy URL"
-                    content={result.url}
-                    shortcut={Keyboard.Shortcut.Common.Copy}
-                  />
-                  {deferredSearch.trim().length > 0 && (
-                    <Action
-                      title="Refresh"
-                      icon={Icon.ArrowClockwise}
-                      shortcut={Keyboard.Shortcut.Common.Refresh}
-                      onAction={async () => {
-                        await queryClient.invalidateQueries({
-                          queryKey: ["wowhead", "search"],
-                        });
-                        await showToast({
-                          style: Toast.Style.Success,
-                          title: "Refreshed results",
-                        });
-                      }}
-                    />
-                  )}
-                </ActionPanel>
-              }
-            />
-          ))}
+      {deferredSearch.trim().length === 0 ? (
+        favorites.length === 0 ? (
+          emptyView
+        ) : (
+          <List.Section title="Favorites" subtitle={`${favorites.length}`}>
+            {favorites.map((result) => renderResultItem(result))}
+          </List.Section>
+        )
+      ) : results.length === 0 ? (
+        emptyView
+      ) : (
+        results.map((result) => renderResultItem(result))
+      )}
     </List>
   );
 }
