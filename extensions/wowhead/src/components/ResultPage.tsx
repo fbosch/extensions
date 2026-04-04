@@ -159,7 +159,7 @@ export function ResultPage({
         <Detail.Metadata>
           <Detail.Metadata.Label title="Type" text={result.typeLabel} />
           {result.entityId && <Detail.Metadata.Label title="ID" text={result.entityId} />}
-          {detail?.quality !== undefined && (
+          {detail?.quality !== undefined && detail.quality >= 0 && (
             <Detail.Metadata.TagList title="Quality">
               <Detail.Metadata.TagList.Item
                 text={QUALITY_LABELS[detail.quality] ?? `Quality ${detail.quality}`}

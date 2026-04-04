@@ -13,7 +13,11 @@ import {
   useNavigation,
 } from "@vicinae/api";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { fetchWowheadEntityDetail, searchWowhead } from "./api";
+import {
+  fetchWowheadEngagementCounts,
+  fetchWowheadEntityDetail,
+  searchWowhead,
+} from "./api";
 import { ResultPage } from "./components/ResultPage";
 import {
   CACHE_MAX_AGE_MS,
@@ -107,8 +111,25 @@ function WowheadCommand() {
               icon={Icon.AppWindowSidebarRight}
               shortcut={Keyboard.Shortcut.Common.Open}
               onAction={async () => {
-                const detail = await fetchWowheadEntityDetail(result);
-                push(<ResultPage result={result} initialDetail={detail} />);
+                const [detail, engagement] = await Promise.all([
+                  fetchWowheadEntityDetail(result),
+                  fetchWowheadEngagementCounts(result),
+                ]);
+
+                const mergedDetail = detail
+                  ? {
+                      ...detail,
+                      commentCount: detail.commentCount ?? engagement.commentCount,
+                      screenshotCount:
+                        detail.screenshotCount ?? engagement.screenshotCount,
+                      highlightedScreenshotUrl:
+                        detail.highlightedScreenshotUrl ??
+                        engagement.highlightedScreenshotUrl,
+                      topComments: detail.topComments ?? engagement.topComments,
+                    }
+                  : detail;
+
+                push(<ResultPage result={result} initialDetail={mergedDetail} />);
               }}
             />
             <Action
