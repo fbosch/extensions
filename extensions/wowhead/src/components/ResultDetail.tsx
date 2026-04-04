@@ -7,10 +7,11 @@ function buildMarkdown(result: WowheadResult, detail?: WowheadEntityDetail): str
   const heading = detail?.name ?? result.title;
   const primaryTooltip = detail?.tooltipMarkdown?.trim();
   const secondaryTooltip = detail?.secondaryTooltipMarkdown?.trim();
+  const primaryTooltipWithExtraBreak = primaryTooltip?.replace(/<br\s*\/?>/i, "<br/><br/>");
   const primaryTooltipWithIcon =
-    detail?.iconUrl && primaryTooltip
-      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:0;" />&nbsp;&nbsp;${primaryTooltip}</span>`
-      : primaryTooltip;
+    detail?.iconUrl && primaryTooltipWithExtraBreak
+      ? `<span><img src="${detail.iconUrl}" alt="${heading}" width="36" height="36" style="display:inline-block;vertical-align:middle;margin-right:0;" />&nbsp;&nbsp;${primaryTooltipWithExtraBreak}</span>`
+      : primaryTooltipWithExtraBreak;
   const hasTooltip =
     (primaryTooltipWithIcon?.length ?? 0) > 0 ||
     (secondaryTooltip?.length ?? 0) > 0;
