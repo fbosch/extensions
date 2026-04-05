@@ -23,6 +23,7 @@ import {
   CACHE_MAX_AGE_MS,
   ENTITY_TYPES,
   SEARCH_CACHE_VERSION,
+  SEARCH_DEBOUNCE_MS,
   SEARCH_DEBOUNCE_FALLBACK_TEXT,
 } from "./constants";
 import { addFavorite, isFavoriteResult, readFavorites, removeFavorite } from "./favorites";
@@ -59,6 +60,16 @@ function WowheadCommand() {
   const [entityType, setEntityType] = useState<WowheadEntityType>("all");
   const [favorites, setFavorites] = useState<WowheadResult[]>([]);
   const deferredSearch = useDeferredValue(searchText);
+  const [debouncedSearch, setDebouncedSearch] = useState(deferredSearch);
+  const normalizedSearch = debouncedSearch.trim();
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedSearch(deferredSearch);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [deferredSearch]);
 
   useEffect(() => {
     setFavorites(readFavorites());
@@ -69,11 +80,11 @@ function WowheadCommand() {
       "wowhead",
       "search",
       SEARCH_CACHE_VERSION,
-      deferredSearch,
+      normalizedSearch,
       entityType,
     ],
-    queryFn: () => searchWowhead(deferredSearch, entityType),
-    enabled: deferredSearch.trim().length > 0,
+    queryFn: () => searchWowhead(normalizedSearch, entityType),
+    enabled: normalizedSearch.length > 0,
   });
 
   const results = useMemo(() => query.data ?? [], [query.data]);
@@ -148,7 +159,7 @@ function WowheadCommand() {
               shortcut={isFavorite ? Keyboard.Shortcut.Common.Remove : Keyboard.Shortcut.Common.Pin}
               onAction={() => toggleFavorite(result)}
             />
-            {deferredSearch.trim().length > 0 && (
+            {normalizedSearch.length > 0 && (
               <Action
                 title="Refresh"
                 icon={Icon.ArrowClockwise}
@@ -171,7 +182,7 @@ function WowheadCommand() {
   }
 
   const emptyView = (() => {
-    if (deferredSearch.trim().length === 0) {
+    if (normalizedSearch.length === 0) {
       return (
         <List.EmptyView
           title="Search Wowhead"
@@ -218,7 +229,7 @@ function WowheadCommand() {
         </List.Dropdown>
       }
     >
-      {deferredSearch.trim().length === 0 ? (
+      {normalizedSearch.length === 0 ? (
         favorites.length === 0 ? (
           emptyView
         ) : (
